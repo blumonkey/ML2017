@@ -251,5 +251,5 @@ print("Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() * 2))
 #     
 # TODO:
 # -----
-#     - ROC?
 #     - Confusion Matrix
+#     - Precision / Recall
