@@ -249,37 +249,39 @@ def batch_preprocessor_w2v(inp, w2v):
     result.columns = ['Text', 'Sentiment']
     return result
 
-# Chosen for optimal running time
-num_runs = 5
-
-
-# Storing the errors and confusion matrices for each model over the runs.
-
-errors = {
-	'lbsa': [],
-	'nn': [],
-	'svm': []
-}
-
-confusion_matrices = {
-	'lbsa': [],
-	'nn': [],
-	'svm': []
-}
-
-# Parameter pool to optimize upon, for NN and SVMs.
-MLP_parameters = {
-	'solver':['adam', 'sgd'], 
-	'alpha':[1e-3, 1e-4, 1e-5],                                # * or / 10 on the default value used by sklearn
-	'hidden_layer_sizes': [(4), (8), (16), (32)] 
-}
-
-SVM_parameters = {
-	'kernel': ['linear'], 
-	'C':[1.0, 2.0, 2.0**2, 2.0**3, 2.0**4, 2.0**5]             # We dont check C values less than 1, as they perform worse than the rest, and add to the expense of unnecessary computation.
-}
 
 def main():
+
+	# Chosen for optimal running time
+	num_runs = 5
+
+
+	# Storing the errors and confusion matrices for each model over the runs.
+
+	errors = {
+		'lbsa': [],
+		'nn': [],
+		'svm': []
+	}
+
+	confusion_matrices = {
+		'lbsa': [],
+		'nn': [],
+		'svm': []
+	}
+
+	# Parameter pool to optimize upon, for NN and SVMs.
+	MLP_parameters = {
+		'solver':['adam', 'sgd'], 
+		'alpha':[1e-3, 1e-4, 1e-5],                                # * or / 10 on the default value used by sklearn
+		'hidden_layer_sizes': [(4), (8), (16), (32)] 
+	}
+
+	SVM_parameters = {
+		'kernel': ['linear'], 
+		'C':[1.0, 2.0, 2.0**2, 2.0**3, 2.0**4, 2.0**5]             # We dont check C values less than 1, as they perform worse than the rest, and add to the expense of unnecessary computation.
+	}
+
 	# Independent runs
 	for i in range(num_runs):
 		
@@ -366,24 +368,24 @@ def main():
 
 	statistic, pvalue =  stats.ttest_ind(errors['lbsa'], errors['nn'], equal_var=False)
 
-	print 'One tailed p-value: %f ' % (pvalue / 2.0)
-	print 'One tailed t-stat: %f ' % statistic
+	print 'Two tailed p-value: %f ' % (pvalue)
+	print 'Two tailed t-stat: %f ' % statistic
 
 	print ''
 	print 'Neural Network vs SVM:'
 
 	statistic, pvalue =  stats.ttest_ind(errors['nn'], errors['svm'], equal_var=False)
 
-	print 'One tailed p-value: %f ' % (pvalue / 2.0)
-	print 'One tailed t-stat: %f ' % statistic
+	print 'Two tailed p-value: %f ' % (pvalue)
+	print 'Two tailed t-stat: %f ' % statistic
 
 	print ''
 	print 'SVM vs LexiconBasedSA:'
 
 	statistic, pvalue =  stats.ttest_ind(errors['svm'], errors['lbsa'], equal_var=False)
 
-	print 'One tailed p-value: %f ' % (pvalue / 2.0)
-	print 'One tailed t-stat: %f ' % statistic
+	print 'Two tailed p-value: %f ' % (pvalue)
+	print 'Two tailed t-stat: %f ' % statistic
 
 if __name__=="__main__":
 	main()
