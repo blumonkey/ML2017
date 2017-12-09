@@ -35,6 +35,10 @@ from sklearn.metrics import confusion_matrix
 from sklearn.metrics import precision_recall_fscore_support
 from sklearn.grid_search import GridSearchCV
 
+import urllib
+import os
+import zipfile
+
 # Stopwords to be used in preprocessor
 # stop = stopwords.words('english')
 stop_edit = [u'i', u'me', u'my', u'myself', u'we', u'our', u'ours', u'ourselves', u'you', u'your', u'yours', u'yourself', u'yourselves', u'he', u'him', u'his', u'himself', u'she', u'her', u'hers', u'herself', u'it', u'its', u'itself', u'they', u'them', u'their', u'theirs', u'themselves', u'what', u'which', u'who', u'whom', u'this', u'that', u'these', u'those', u'am', u'is', u'are', u'was', u'were', u'be', u'been', u'being', u'have', u'has', u'had', u'having', u'do', u'does', u'did', u'doing', u'a', u'an', u'the', u'and', u'but', u'if', u'or', u'because', u'as', u'until', u'while', u'of', u'at', u'by', u'for', u'with', u'about', u'between', u'into', u'through', u'during', u'before', u'after', u'above', u'below', u'to', u'from', u'up', u'down', u'in', u'out', u'on', u'off', u'over', u'under', u'again', u'further', u'then', u'once', u'here', u'there', u'when', u'where', u'why', u'how', u'all', u'any', u'both', u'each', u'few', u'more', u'most', u'other', u'some', u'such', u'only', u'own', u'same', u'so', u'than', u'too', u'very', u'can', u'will', u'just', u'should', u'now']
@@ -43,7 +47,7 @@ def load_reviews():
     """
     Function that loads the reviews from data.txt.
 	"""
-    df = pd.read_csv('data.txt', delimiter='\t', header=None)
+    df = pd.read_csv('./data/data.txt', delimiter='\t', header=None)
     df.columns = ['Text', 'Sentiment']
     # return df.sample(frac=1)
     # return np.split(df.sample(frac=1), [int(.6*len(df)), int(.8*len(df))])
@@ -185,8 +189,26 @@ def load_word2vec():
 	"""
 	Function that loads the word embeddings
 	"""
+
+	fname = './data/glove.6B.50d.txt'
+	zip_path = "./data/glove.zip"
+
+	# Download if not available
+	if not os.path.isfile(fname): 
+		print 'Can\'t find word vectors. Downloading now...'
+		opener = urllib.URLopener()
+		opener.retrieve(" https://nlp.stanford.edu/data/glove.6B.zip", zip_path)
+
+		# Unzip downloaded file
+		zip_ref = zipfile.ZipFile(zip_path, 'r')
+		zip_ref.extract('glove.6B.50d.txt', './data/')
+		zip_ref.close()
+
+		# Remove zip file
+		os.remove(zip_path)
+
 	word2vec = {}
-	with open('glove.6B.50d.txt', 'r') as f:
+	with open(fname, 'r') as f:
 	    for line in f:
 	        tabs = line.split(' ', 1)
 	        word2vec[tabs[0]] = np.array([float(x) for x in tabs[1].split(' ')])
@@ -257,108 +279,111 @@ SVM_parameters = {
 	'C':[1.0, 2.0, 2.0**2, 2.0**3, 2.0**4, 2.0**5]             # We dont check C values less than 1, as they perform worse than the rest, and add to the expense of unnecessary computation.
 }
 
-# Independent runs
-for i in range(num_runs):
-	
-	# Loading the resources
-    reviews_train, reviews_test = load_reviews()
-    word2vec = load_word2vec()
-    reviews_train_w2v = batch_preprocessor_w2v(reviews_train, word2vec)
-    reviews_test_w2v = batch_preprocessor_w2v(reviews_test, word2vec)
+def main():
+	# Independent runs
+	for i in range(num_runs):
+		
+		# Loading the resources
+	    reviews_train, reviews_test = load_reviews()
+	    word2vec = load_word2vec()
+	    reviews_train_w2v = batch_preprocessor_w2v(reviews_train, word2vec)
+	    reviews_test_w2v = batch_preprocessor_w2v(reviews_test, word2vec)
 
 
-    # Running k-fold cross validation with k = 5
+	    # Running k-fold cross validation with k = 5
 
-    # For LexiconBasedSA
-    print 'Lexicon Based'
-    clf = LexiconBasedSA()
-    X = reviews_train['Text']
-    y = reviews_train['Sentiment']
+	    # For LexiconBasedSA
+	    print 'Lexicon Based'
+	    clf = LexiconBasedSA()
+	    X = reviews_train['Text']
+	    y = reviews_train['Sentiment']
 
-    clf.fit(X, y)
-    y_true, y_pred_lex = reviews_test['Sentiment'], clf.predict(reviews_test['Text'])
+	    clf.fit(X, y)
+	    y_true, y_pred_lex = reviews_test['Sentiment'], clf.predict(reviews_test['Text'])
 
-    # Reporting the confusion matrix
-    print 'Confusion Matrix'
-    cf = confusion_matrix(y_pred_lex, y_true)
-    print cf
-    confusion_matrices['lbsa'].append(cf)
+	    # Reporting the confusion matrix
+	    print 'Confusion Matrix'
+	    cf = confusion_matrix(y_pred_lex, y_true)
+	    print cf
+	    confusion_matrices['lbsa'].append(cf)
 
-    # Reporting the accuracy
-    print("Accuracy: %f" % (np.sum(y_pred_lex==y_true)/float(len(reviews_test))))
-    errors['lbsa'].append(np.sum(y_pred_lex==y_true)/float(len(reviews_test)))
-    
+	    # Reporting the accuracy
+	    print("Accuracy: %f" % (np.sum(y_pred_lex==y_true)/float(len(reviews_test))))
+	    errors['lbsa'].append(np.sum(y_pred_lex==y_true)/float(len(reviews_test)))
+	    
 
-    # For Neural Networks
-    print 'Neural Networks:'
-    # Internal cross-validation using Grid Search
-    clf = GridSearchCV(MLPClassifier(), MLP_parameters, cv=5, scoring='accuracy')
-    X = reviews_train_w2v['Text']
-    y = reviews_train_w2v['Sentiment']
-    clf.fit(np.array(list(X)), y)
+	    # For Neural Networks
+	    print 'Neural Networks:'
+	    # Internal cross-validation using Grid Search
+	    clf = GridSearchCV(MLPClassifier(), MLP_parameters, cv=5, scoring='accuracy')
+	    X = reviews_train_w2v['Text']
+	    y = reviews_train_w2v['Sentiment']
+	    clf.fit(np.array(list(X)), y)
 
-    print "Best parameters set found on development set:"
-    print ''
-    print clf.best_estimator_
+	    print "Best parameters set found on development set:"
+	    print ''
+	    print clf.best_estimator_
 
-    y_true, y_pred_nn = reviews_test_w2v['Sentiment'], clf.predict(np.array(list(reviews_test_w2v['Text'])))
+	    y_true, y_pred_nn = reviews_test_w2v['Sentiment'], clf.predict(np.array(list(reviews_test_w2v['Text'])))
 
-    print 'Confusion Matrix'
-    cf = confusion_matrix(y_pred_nn, y_true)
-    print cf
-    confusion_matrices['nn'].append(cf)
+	    print 'Confusion Matrix'
+	    cf = confusion_matrix(y_pred_nn, y_true)
+	    print cf
+	    confusion_matrices['nn'].append(cf)
 
-    print("Accuracy: %f" % (np.sum(y_pred_nn==y_true)/float(len(reviews_test))))
-    errors['nn'].append((np.sum(y_pred_nn==y_true)/float(len(reviews_test))))
-
-
-    # For SVMs
-    print 'SVM:'
-
-    clf = GridSearchCV(svm.SVC(), SVM_parameters, cv=5, scoring='accuracy')
-    X = reviews_train_w2v['Text']
-    y = reviews_train_w2v['Sentiment']
-    clf.fit(np.array(list(X)), y)
-
-    print "Best parameters set found on development set:"
-    print ''
-    print clf.best_estimator_
-
-    y_true, y_pred_svm = reviews_test_w2v['Sentiment'], clf.predict(np.array(list(reviews_test_w2v['Text'])))
-
-    print 'Confusion Matrix'
-    cf = confusion_matrix(y_pred_svm, y_true)
-    print cf
-    confusion_matrices['svm'].append(cf)
-
-    print("Accuracy: %f" % (np.sum(y_pred_svm==y_true)/float(len(reviews_test))))
-    errors['svm'].append((np.sum(y_pred_svm==y_true)/float(len(reviews_test))))
+	    print("Accuracy: %f" % (np.sum(y_pred_nn==y_true)/float(len(reviews_test))))
+	    errors['nn'].append((np.sum(y_pred_nn==y_true)/float(len(reviews_test))))
 
 
-# Doing statistical significance tests.
+	    # For SVMs
+	    print 'SVM:'
 
-print 'Performing statistical tests (alpha = 0.05)...'
-print ''
-print 'LexiconBasedSA vs Neural Network:'
+	    clf = GridSearchCV(svm.SVC(), SVM_parameters, cv=5, scoring='accuracy')
+	    X = reviews_train_w2v['Text']
+	    y = reviews_train_w2v['Sentiment']
+	    clf.fit(np.array(list(X)), y)
 
-statistic, pvalue =  stats.ttest_ind(errors['lbsa'], errors['nn'], equal_var=False)
+	    print "Best parameters set found on development set:"
+	    print ''
+	    print clf.best_estimator_
 
-print 'One tailed p-value: %f ' % (pvalue / 2.0)
-print 'One tailed t-stat: %f ' % statistic
+	    y_true, y_pred_svm = reviews_test_w2v['Sentiment'], clf.predict(np.array(list(reviews_test_w2v['Text'])))
 
-print ''
-print 'Neural Network vs SVM:'
+	    print 'Confusion Matrix'
+	    cf = confusion_matrix(y_pred_svm, y_true)
+	    print cf
+	    confusion_matrices['svm'].append(cf)
 
-statistic, pvalue =  stats.ttest_ind(errors['nn'], errors['svm'], equal_var=False)
+	    print("Accuracy: %f" % (np.sum(y_pred_svm==y_true)/float(len(reviews_test))))
+	    errors['svm'].append((np.sum(y_pred_svm==y_true)/float(len(reviews_test))))
 
-print 'One tailed p-value: %f ' % (pvalue / 2.0)
-print 'One tailed t-stat: %f ' % statistic
 
-print ''
-print 'SVM vs LexiconBasedSA:'
+	# Doing statistical significance tests.
 
-statistic, pvalue =  stats.ttest_ind(errors['svm'], errors['lbsa'], equal_var=False)
+	print 'Performing statistical tests (alpha = 0.05)...'
+	print ''
+	print 'LexiconBasedSA vs Neural Network:'
 
-print 'One tailed p-value: %f ' % (pvalue / 2.0)
-print 'One tailed t-stat: %f ' % statistic
+	statistic, pvalue =  stats.ttest_ind(errors['lbsa'], errors['nn'], equal_var=False)
 
+	print 'One tailed p-value: %f ' % (pvalue / 2.0)
+	print 'One tailed t-stat: %f ' % statistic
+
+	print ''
+	print 'Neural Network vs SVM:'
+
+	statistic, pvalue =  stats.ttest_ind(errors['nn'], errors['svm'], equal_var=False)
+
+	print 'One tailed p-value: %f ' % (pvalue / 2.0)
+	print 'One tailed t-stat: %f ' % statistic
+
+	print ''
+	print 'SVM vs LexiconBasedSA:'
+
+	statistic, pvalue =  stats.ttest_ind(errors['svm'], errors['lbsa'], equal_var=False)
+
+	print 'One tailed p-value: %f ' % (pvalue / 2.0)
+	print 'One tailed t-stat: %f ' % statistic
+
+if __name__=="__main__":
+	main()
