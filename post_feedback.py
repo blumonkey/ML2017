@@ -1,11 +1,26 @@
 
 # coding: utf-8
+"""
+
+Author: Samuel Suraj Bushi
+M.Sc, Univeristy of Alberta.
+
+In this project, we try to predict the sentiment on reviews on Amazon, IMDB and Yelp!
+We compare Lexicon-based, SVMs and Neural Network methods and use accuracy as a performance metric.
+We report confusion matrices and micro-averaged precision recall and use statistical significance test
+to test if the findings are statistically significant.
+
+-- Project completed as part of Machine Learning Course (2017), under Prof. Martha White.
+
+December 8th, 2017
+
+"""
 
 from __future__ import division
 import numpy as np
 import pandas as pd
 import nltk
-from nltk.corpus import stopwords
+# from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 from nltk.stem import SnowballStemmer
 from nltk import word_tokenize
@@ -14,19 +29,27 @@ import re
 from sklearn.neural_network import MLPClassifier
 from sklearn import svm
 from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_predict
+from scipy import stats
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import precision_recall_fscore_support
+from sklearn.grid_search import GridSearchCV
 
 # Stopwords to be used in preprocessor
-stop = stopwords.words('english')
+# stop = stopwords.words('english')
 stop_edit = [u'i', u'me', u'my', u'myself', u'we', u'our', u'ours', u'ourselves', u'you', u'your', u'yours', u'yourself', u'yourselves', u'he', u'him', u'his', u'himself', u'she', u'her', u'hers', u'herself', u'it', u'its', u'itself', u'they', u'them', u'their', u'theirs', u'themselves', u'what', u'which', u'who', u'whom', u'this', u'that', u'these', u'those', u'am', u'is', u'are', u'was', u'were', u'be', u'been', u'being', u'have', u'has', u'had', u'having', u'do', u'does', u'did', u'doing', u'a', u'an', u'the', u'and', u'but', u'if', u'or', u'because', u'as', u'until', u'while', u'of', u'at', u'by', u'for', u'with', u'about', u'between', u'into', u'through', u'during', u'before', u'after', u'above', u'below', u'to', u'from', u'up', u'down', u'in', u'out', u'on', u'off', u'over', u'under', u'again', u'further', u'then', u'once', u'here', u'there', u'when', u'where', u'why', u'how', u'all', u'any', u'both', u'each', u'few', u'more', u'most', u'other', u'some', u'such', u'only', u'own', u'same', u'so', u'than', u'too', u'very', u'can', u'will', u'just', u'should', u'now']
 
 def load_reviews():
     """
     Function that loads the reviews from data.txt.
 	"""
-    df = pd.read_csv('data/shuf_data.txt', delimiter='\t', header=None)
+    df = pd.read_csv('data.txt', delimiter='\t', header=None)
     df.columns = ['Text', 'Sentiment']
-    return df
+    # return df.sample(frac=1)
     # return np.split(df.sample(frac=1), [int(.6*len(df)), int(.8*len(df))])
+    train=df.sample(frac=0.8)
+    test=df.drop(train.index)
+    return train, test
 
 def lemmatize(s):
     """
@@ -163,14 +186,14 @@ def load_word2vec():
 	Function that loads the word embeddings
 	"""
 	word2vec = {}
-	with open('data/glove.6B.50d.txt', 'r') as f:
+	with open('glove.6B.50d.txt', 'r') as f:
 	    for line in f:
 	        tabs = line.split(' ', 1)
 	        word2vec[tabs[0]] = np.array([float(x) for x in tabs[1].split(' ')])
 	return word2vec
 
 
-def list2vec(tokens):
+def list2vec(tokens, word2vec):
     """
 	Function that converts a list of tokens to bag of words representation in word2vec
 	"""
@@ -189,7 +212,7 @@ def normalized(a, axis=-1, order=2):
     return a / np.expand_dims(l2, axis)
 
 
-def batch_preprocessor_w2v(inp):
+def batch_preprocessor_w2v(inp, w2v):
     """
 	Batch preprocessor for word2vec
 	"""
@@ -197,59 +220,145 @@ def batch_preprocessor_w2v(inp):
     for index, row in inp.iterrows():
         total = preprocessor(row['Text'])
         # total = normalized(list2vec(total))[0]
-        total = list2vec(total)
+        total = list2vec(total, w2v)
         data_.append((total, row['Sentiment']))
     
     result = pd.DataFrame(data_)
     result.columns = ['Text', 'Sentiment']
     return result
 
-# Loading the resources
-reviews = load_reviews()
-word2vec = load_word2vec()
-reviews_w2v = batch_preprocessor_w2v(reviews)
+# Chosen for optimal running time
+num_runs = 5
 
 
-# Running k-fold cross validation with k = 5
+# Storing the errors and confusion matrices for each model over the runs.
 
-# For LexiconBasedSA
-print 'Lexicon Based'
-clf = LexiconBasedSA()
-X = reviews['Text']
-y = reviews['Sentiment']
-scores = cross_val_score(clf, X, y, cv=5, scoring='accuracy')
-print scores
-print("Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() * 2))
+errors = {
+	'lbsa': [],
+	'nn': [],
+	'svm': []
+}
 
-# For Neural Networks
-print 'Neural Networks:'
+confusion_matrices = {
+	'lbsa': [],
+	'nn': [],
+	'svm': []
+}
 
-clf = MLPClassifier(solver='adam', alpha=1e-5, hidden_layer_sizes=(100, 50))
-X = reviews_w2v['Text']
-y = reviews_w2v['Sentiment']
-scores = cross_val_score(clf, np.array(list(X)), y, cv=5, scoring='accuracy')
-print scores
-print("Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() * 2))
+# Parameter pool to optimize upon, for NN and SVMs.
+MLP_parameters = {
+	'solver':['adam', 'sgd'], 
+	'alpha':[1e-3, 1e-4, 1e-5],                                # * or / 10 on the default value used by sklearn
+	'hidden_layer_sizes': [(4), (8), (16), (32)] 
+}
+
+SVM_parameters = {
+	'kernel': ['linear'], 
+	'C':[1.0, 2.0, 2.0**2, 2.0**3, 2.0**4, 2.0**5]             # We dont check C values less than 1, as they perform worse than the rest, and add to the expense of unnecessary computation.
+}
+
+# Independent runs
+for i in range(num_runs):
+	
+	# Loading the resources
+    reviews_train, reviews_test = load_reviews()
+    word2vec = load_word2vec()
+    reviews_train_w2v = batch_preprocessor_w2v(reviews_train, word2vec)
+    reviews_test_w2v = batch_preprocessor_w2v(reviews_test, word2vec)
 
 
-# For SVMs
-print 'SVM:'
+    # Running k-fold cross validation with k = 5
 
-clf = svm.SVC(C=5.0)
-X = reviews_w2v['Text']
-y = reviews_w2v['Sentiment']
-scores = cross_val_score(clf, np.array(list(X)), y, cv=5, scoring='accuracy')
-print scores
-print("Accuracy: %0.2f (+/- %0.2f)" % (scores.mean(), scores.std() * 2))
+    # For LexiconBasedSA
+    print 'Lexicon Based'
+    clf = LexiconBasedSA()
+    X = reviews_train['Text']
+    y = reviews_train['Sentiment']
+
+    clf.fit(X, y)
+    y_true, y_pred_lex = reviews_test['Sentiment'], clf.predict(reviews_test['Text'])
+
+    # Reporting the confusion matrix
+    print 'Confusion Matrix'
+    cf = confusion_matrix(y_pred_lex, y_true)
+    print cf
+    confusion_matrices['lbsa'].append(cf)
+
+    # Reporting the accuracy
+    print("Accuracy: %f" % (np.sum(y_pred_lex==y_true)/float(len(reviews_test))))
+    errors['lbsa'].append(np.sum(y_pred_lex==y_true)/float(len(reviews_test)))
+    
+
+    # For Neural Networks
+    print 'Neural Networks:'
+    # Internal cross-validation using Grid Search
+    clf = GridSearchCV(MLPClassifier(), MLP_parameters, cv=5, scoring='accuracy')
+    X = reviews_train_w2v['Text']
+    y = reviews_train_w2v['Sentiment']
+    clf.fit(np.array(list(X)), y)
+
+    print "Best parameters set found on development set:"
+    print ''
+    print clf.best_estimator_
+
+    y_true, y_pred_nn = reviews_test_w2v['Sentiment'], clf.predict(np.array(list(reviews_test_w2v['Text'])))
+
+    print 'Confusion Matrix'
+    cf = confusion_matrix(y_pred_nn, y_true)
+    print cf
+    confusion_matrices['nn'].append(cf)
+
+    print("Accuracy: %f" % (np.sum(y_pred_nn==y_true)/float(len(reviews_test))))
+    errors['nn'].append((np.sum(y_pred_nn==y_true)/float(len(reviews_test))))
 
 
-# So the current rankings are:
-# -----
-#     - Lexicon based methods: Accuracy: 0.80 (+/- 0.04)
-#     - SVMs: Accuracy: 0.78 (+/- 0.02)
-#     - Neural Networks: Accuracy: 0.77 (+/- 0.04)
-#     
-# TODO:
-# -----
-#     - Confusion Matrix
-#     - Precision / Recall
+    # For SVMs
+    print 'SVM:'
+
+    clf = GridSearchCV(svm.SVC(), SVM_parameters, cv=5, scoring='accuracy')
+    X = reviews_train_w2v['Text']
+    y = reviews_train_w2v['Sentiment']
+    clf.fit(np.array(list(X)), y)
+
+    print "Best parameters set found on development set:"
+    print ''
+    print clf.best_estimator_
+
+    y_true, y_pred_svm = reviews_test_w2v['Sentiment'], clf.predict(np.array(list(reviews_test_w2v['Text'])))
+
+    print 'Confusion Matrix'
+    cf = confusion_matrix(y_pred_svm, y_true)
+    print cf
+    confusion_matrices['svm'].append(cf)
+
+    print("Accuracy: %f" % (np.sum(y_pred_svm==y_true)/float(len(reviews_test))))
+    errors['svm'].append((np.sum(y_pred_svm==y_true)/float(len(reviews_test))))
+
+
+# Doing statistical significance tests.
+
+print 'Performing statistical tests (alpha = 0.05)...'
+print ''
+print 'LexiconBasedSA vs Neural Network:'
+
+statistic, pvalue =  stats.ttest_ind(errors['lbsa'], errors['nn'], equal_var=False)
+
+print 'One tailed p-value: %f ' % (pvalue / 2.0)
+print 'One tailed t-stat: %f ' % statistic
+
+print ''
+print 'Neural Network vs SVM:'
+
+statistic, pvalue =  stats.ttest_ind(errors['nn'], errors['svm'], equal_var=False)
+
+print 'One tailed p-value: %f ' % (pvalue / 2.0)
+print 'One tailed t-stat: %f ' % statistic
+
+print ''
+print 'SVM vs LexiconBasedSA:'
+
+statistic, pvalue =  stats.ttest_ind(errors['svm'], errors['lbsa'], equal_var=False)
+
+print 'One tailed p-value: %f ' % (pvalue / 2.0)
+print 'One tailed t-stat: %f ' % statistic
+
