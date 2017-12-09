@@ -206,6 +206,7 @@ def load_word2vec():
 
 		# Remove zip file
 		os.remove(zip_path)
+		print 'Done!'
 
 	word2vec = {}
 	with open(fname, 'r') as f:
